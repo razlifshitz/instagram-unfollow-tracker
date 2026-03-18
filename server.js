@@ -128,16 +128,42 @@ app.get('/auth/callback', async (req, res) => {
     if (longData.error) throw new Error(longData.error.message);
     const { access_token, expires_in } = longData;
 
-    // 3. Get Instagram account via Facebook Pages the user manages
+    // 3. Get Instagram account — try multiple methods for compatibility
+    let igAccount = null;
+
+    // Method A: via Facebook Pages (regular Facebook Login)
     const pagesRes = await fetch(
       `https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account{id,username,name}&access_token=${access_token}`
     );
     const pagesData = await pagesRes.json();
-    if (pagesData.error) throw new Error(pagesData.error.message);
+    if (!pagesData.error) {
+      const pageWithIG = pagesData.data?.find(p => p.instagram_business_account);
+      igAccount = pageWithIG?.instagram_business_account || null;
+    }
 
-    const pageWithIG = pagesData.data?.find(p => p.instagram_business_account);
-    const igAccount = pageWithIG?.instagram_business_account;
-    if (!igAccount) throw new Error('No Instagram Business/Creator account linked to any Facebook Page you manage');
+    // Method B: direct Instagram accounts (Facebook Login for Business)
+    if (!igAccount) {
+      const igRes = await fetch(
+        `https://graph.facebook.com/v19.0/me/instagram_business_accounts?fields=id,username,name&access_token=${access_token}`
+      );
+      const igData = await igRes.json();
+      if (!igData.error && igData.data?.length > 0) {
+        igAccount = igData.data[0];
+      }
+    }
+
+    // Method C: via user's owned businesses
+    if (!igAccount) {
+      const bizRes = await fetch(
+        `https://graph.facebook.com/v19.0/me?fields=id,name,instagram_business_account{id,username,name}&access_token=${access_token}`
+      );
+      const bizData = await bizRes.json();
+      if (!bizData.error && bizData.instagram_business_account) {
+        igAccount = bizData.instagram_business_account;
+      }
+    }
+
+    if (!igAccount) throw new Error(`No IG account found. Pages: ${JSON.stringify(pagesData?.data?.length)} items`);
 
     // 4. Upsert user in DB
     await pool.query(`
