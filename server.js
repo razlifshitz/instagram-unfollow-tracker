@@ -9,7 +9,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
