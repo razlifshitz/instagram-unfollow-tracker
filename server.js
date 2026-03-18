@@ -128,15 +128,16 @@ app.get('/auth/callback', async (req, res) => {
     if (longData.error) throw new Error(longData.error.message);
     const { access_token, expires_in } = longData;
 
-    // 3. Get the Instagram Business/Creator account linked to this FB account
-    const meRes = await fetch(
-      `https://graph.facebook.com/v19.0/me?fields=id,name,instagram_business_account{id,username,name}&access_token=${access_token}`
+    // 3. Get Instagram account via Facebook Pages the user manages
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account{id,username,name}&access_token=${access_token}`
     );
-    const meData = await meRes.json();
-    if (meData.error) throw new Error(meData.error.message);
+    const pagesData = await pagesRes.json();
+    if (pagesData.error) throw new Error(pagesData.error.message);
 
-    const igAccount = meData.instagram_business_account;
-    if (!igAccount) throw new Error('No Instagram Business/Creator account linked to this Facebook account');
+    const pageWithIG = pagesData.data?.find(p => p.instagram_business_account);
+    const igAccount = pageWithIG?.instagram_business_account;
+    if (!igAccount) throw new Error('No Instagram Business/Creator account linked to any Facebook Page you manage');
 
     // 4. Upsert user in DB
     await pool.query(`
