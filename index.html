@@ -78,8 +78,9 @@
   const params = new URLSearchParams(location.search);
   if (params.get('error')) {
     const el = document.getElementById('error-msg');
-    const msgs = { access_denied: 'You denied access. Try again.', auth_failed: 'Authentication failed. Check your app config.', no_code: 'No code returned from Instagram.' };
-    el.textContent = msgs[params.get('error')] || 'Something went wrong. Please try again.';
+    const raw = params.get('error');
+    const knownMsgs = { access_denied: 'You denied access. Try again.' };
+    el.textContent = knownMsgs[raw] || raw;
     el.style.display = 'block';
   }
 </script>
