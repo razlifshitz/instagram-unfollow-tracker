@@ -94,7 +94,7 @@ app.get('/auth/instagram', (req, res) => {
   const params = new URLSearchParams({
     client_id:     process.env.IG_APP_ID,
     redirect_uri:  process.env.IG_REDIRECT_URI,
-    scope:         'instagram_basic,instagram_manage_insights',
+    scope:         'instagram_business_basic,instagram_business_manage_insights',
     response_type: 'code'
   });
   res.redirect(`https://api.instagram.com/oauth/authorize?${params}`);
