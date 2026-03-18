@@ -94,7 +94,7 @@ app.get('/auth/instagram', (req, res) => {
   const params = new URLSearchParams({
     client_id:     process.env.IG_APP_ID,
     redirect_uri:  process.env.IG_REDIRECT_URI,
-    scope:         'instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement',
+    scope:         'instagram_basic,pages_show_list,pages_read_engagement',
     response_type: 'code'
   });
   res.redirect(`https://www.facebook.com/dialog/oauth?${params}`);
@@ -120,53 +120,26 @@ app.get('/auth/callback', async (req, res) => {
     if (tokenData.error) throw new Error(tokenData.error.message);
     const shortToken = tokenData.access_token;
 
-    // 2. Find Instagram account using the SHORT-LIVED token (before exchange)
-    //    Business Login tokens behave differently after fb_exchange_token
-    let igAccount = null;
-    let igDebug = {};
-
-    // Try A: pages → instagram_business_account (works with regular Facebook Login)
-    const pagesRes = await fetch(
-      `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username,name}&access_token=${shortToken}`
-    );
-    const pagesData = await pagesRes.json();
-    igDebug.pages = pagesData;
-    if (!pagesData.error && pagesData.data?.length > 0) {
-      const p = pagesData.data.find(p => p.instagram_business_account);
-      if (p) igAccount = p.instagram_business_account;
-    }
-
-    // Try B: /me/instagram_business_accounts (Facebook Login for Business direct)
-    if (!igAccount) {
-      const igRes = await fetch(
-        `https://graph.facebook.com/v19.0/me/instagram_business_accounts?fields=id,username,name&access_token=${shortToken}`
-      );
-      const igData = await igRes.json();
-      igDebug.igAccounts = igData;
-      if (!igData.error && igData.data?.length > 0) igAccount = igData.data[0];
-    }
-
-    // Try C: /me?fields=instagram_business_account
-    if (!igAccount) {
-      const meRes = await fetch(
-        `https://graph.facebook.com/v19.0/me?fields=id,name,instagram_business_account{id,username,name}&access_token=${shortToken}`
-      );
-      const meData = await meRes.json();
-      igDebug.me = meData;
-      if (!meData.error && meData.instagram_business_account) igAccount = meData.instagram_business_account;
-    }
-
-    if (!igAccount) {
-      throw new Error(`Could not find Instagram account. Debug: ${JSON.stringify(igDebug).substring(0, 600)}`);
-    }
-
-    // 3. Exchange short-lived → long-lived FB user token (60 days)
+    // 2. Exchange short-lived → long-lived FB user token (60 days)
     const longRes = await fetch(
       `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${shortToken}`
     );
     const longData = await longRes.json();
     if (longData.error) throw new Error(longData.error.message);
     const { access_token, expires_in } = longData;
+
+    // 3. Find linked Instagram Business/Creator account via Facebook Pages
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username,name}&access_token=${access_token}`
+    );
+    const pagesData = await pagesRes.json();
+    if (pagesData.error) throw new Error(`Could not fetch Facebook Pages: ${pagesData.error.message}`);
+
+    const linkedPage = pagesData.data?.find(p => p.instagram_business_account);
+    if (!linkedPage) {
+      throw new Error('No Instagram Business or Creator account found linked to your Facebook Page. Make sure your Instagram account is connected to a Facebook Page you manage.');
+    }
+    const igAccount = linkedPage.instagram_business_account;
 
     // 4. Upsert user in DB
     await pool.query(`
