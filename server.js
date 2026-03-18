@@ -163,7 +163,14 @@ app.get('/auth/callback', async (req, res) => {
       }
     }
 
-    if (!igAccount) throw new Error(`No IG account found. Pages: ${JSON.stringify(pagesData?.data?.length)} items`);
+    if (!igAccount) {
+      // Debug: dump raw API responses to understand token capabilities
+      const debugMe = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${access_token}`);
+      const meInfo = await debugMe.json();
+      const debugBiz = await fetch(`https://graph.facebook.com/v19.0/me/businesses?access_token=${access_token}`);
+      const bizInfo = await debugBiz.json();
+      throw new Error(`me:${JSON.stringify(meInfo)} | pages:${JSON.stringify(pagesData)} | biz:${JSON.stringify(bizInfo).substring(0,300)}`);
+    }
 
     // 4. Upsert user in DB
     await pool.query(`
