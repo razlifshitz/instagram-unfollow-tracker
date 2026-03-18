@@ -60,7 +60,7 @@ async function refreshTokenIfNeeded(user) {
   const tenDays = 10 * 24 * 60 * 60 * 1000;
   if (user.token_expires_at - Date.now() < tenDays) {
     const r = await fetch(
-      `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${user.access_token}`
+      `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.access_token}`
     );
     const data = await r.json();
     if (data.access_token) {
@@ -77,7 +77,7 @@ async function refreshTokenIfNeeded(user) {
 // ── Instagram API helpers ─────────────────────────────────────────────────────
 async function fetchAllFollowers(igUserId, accessToken) {
   const followers = [];
-  let url = `https://graph.facebook.com/v19.0/${igUserId}/followers?fields=id,username,name&limit=50&access_token=${accessToken}`;
+  let url = `https://graph.instagram.com/${igUserId}/followers?fields=id,username,name&limit=50&access_token=${accessToken}`;
 
   while (url) {
     const res  = await fetch(url);
@@ -89,107 +89,15 @@ async function fetchAllFollowers(igUserId, accessToken) {
   return followers;
 }
 
-// ── resolveIgAccount: try multiple endpoints to find IG account ───────────────
-async function resolveIgAccount(accessToken) {
-  const base = 'https://graph.facebook.com/v19.0';
-  const igFields = 'instagram_business_account{id,username,name}';
-
-  // Helper: extract first IG account from a pages-style response
-  function extractFromPages(data) {
-    const page = data?.data?.find(p => p.instagram_business_account?.id);
-    return page ? page.instagram_business_account : null;
-  }
-
-  // 1. Standard Facebook Login: /me/accounts
-  try {
-    const r = await fetch(`${base}/me/accounts?fields=id,name,${igFields}&access_token=${accessToken}`);
-    const d = await r.json();
-    console.log('/me/accounts response:', JSON.stringify(d).slice(0, 300));
-    if (!d.error) {
-      const ig = extractFromPages(d);
-      if (ig?.id) { console.log('Found IG via /me/accounts'); return ig; }
-    }
-  } catch (e) { console.warn('/me/accounts failed:', e.message); }
-
-  // 2. Facebook Login for Business: /me/assigned_pages
-  try {
-    const r = await fetch(`${base}/me/assigned_pages?fields=id,name,${igFields}&access_token=${accessToken}`);
-    const d = await r.json();
-    console.log('/me/assigned_pages response:', JSON.stringify(d).slice(0, 300));
-    if (!d.error) {
-      const ig = extractFromPages(d);
-      if (ig?.id) { console.log('Found IG via /me/assigned_pages'); return ig; }
-    }
-  } catch (e) { console.warn('/me/assigned_pages failed:', e.message); }
-
-  // 3. /me/client_pages
-  try {
-    const r = await fetch(`${base}/me/client_pages?fields=id,name,${igFields}&access_token=${accessToken}`);
-    const d = await r.json();
-    console.log('/me/client_pages response:', JSON.stringify(d).slice(0, 300));
-    if (!d.error) {
-      const ig = extractFromPages(d);
-      if (ig?.id) { console.log('Found IG via /me/client_pages'); return ig; }
-    }
-  } catch (e) { console.warn('/me/client_pages failed:', e.message); }
-
-  // 4a. Get FB user ID then try /{fb_user_id}/instagram_business_accounts
-  let fbUserId = null;
-  try {
-    const r = await fetch(`${base}/me?fields=id&access_token=${accessToken}`);
-    const d = await r.json();
-    if (d.id) { fbUserId = d.id; console.log('FB user ID:', fbUserId); }
-  } catch (e) { console.warn('/me failed:', e.message); }
-
-  if (fbUserId) {
-    try {
-      const r = await fetch(`${base}/${fbUserId}/instagram_business_accounts?fields=id,username,name&access_token=${accessToken}`);
-      const d = await r.json();
-      console.log(`/${fbUserId}/instagram_business_accounts response:`, JSON.stringify(d).slice(0, 300));
-      if (!d.error && d.data?.[0]?.id) {
-        console.log('Found IG via instagram_business_accounts');
-        return d.data[0];
-      }
-    } catch (e) { console.warn('instagram_business_accounts failed:', e.message); }
-  }
-
-  // 4b. /me/instagram_accounts (personal IG accounts)
-  try {
-    const r = await fetch(`${base}/me/instagram_accounts?fields=id,username,name&access_token=${accessToken}`);
-    const d = await r.json();
-    console.log('/me/instagram_accounts response:', JSON.stringify(d).slice(0, 300));
-    if (!d.error && d.data?.[0]?.id) {
-      console.log('Found IG via /me/instagram_accounts');
-      return d.data[0];
-    }
-  } catch (e) { console.warn('/me/instagram_accounts failed:', e.message); }
-
-  // 4c. Hardcoded fallback: try the well-known IG account ID for this user
-  const HARDCODED_IG_ID = process.env.IG_ACCOUNT_ID;
-  if (HARDCODED_IG_ID) {
-    try {
-      const r = await fetch(`${base}/${HARDCODED_IG_ID}?fields=id,username,name&access_token=${accessToken}`);
-      const d = await r.json();
-      console.log(`Hardcoded IG account ${HARDCODED_IG_ID} response:`, JSON.stringify(d).slice(0, 300));
-      if (!d.error && d.id) {
-        console.log('Found IG via hardcoded IG_ACCOUNT_ID');
-        return { id: d.id, username: d.username, name: d.name };
-      }
-    } catch (e) { console.warn('Hardcoded IG lookup failed:', e.message); }
-  }
-
-  return null;
-}
-
 // ── OAuth routes ──────────────────────────────────────────────────────────────
 app.get('/auth/instagram', (req, res) => {
   const params = new URLSearchParams({
     client_id:     process.env.IG_APP_ID,
     redirect_uri:  process.env.IG_REDIRECT_URI,
-    scope:         'instagram_basic,pages_show_list,pages_read_engagement',
+    scope:         'instagram_basic,instagram_manage_insights',
     response_type: 'code'
   });
-  res.redirect(`https://www.facebook.com/dialog/oauth?${params}`);
+  res.redirect(`https://api.instagram.com/oauth/authorize?${params}`);
 });
 
 app.get('/auth/callback', async (req, res) => {
@@ -197,34 +105,40 @@ app.get('/auth/callback', async (req, res) => {
   if (error || !code) return res.redirect('/?error=access_denied');
 
   try {
-    // 1. Exchange code for short-lived FB user token
-    const tokenRes = await fetch('https://graph.facebook.com/v19.0/oauth/access_token', {
+    // 1. Exchange code for short-lived Instagram token
+    const tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id:     process.env.IG_APP_ID,
         client_secret: process.env.IG_APP_SECRET,
+        grant_type:    'authorization_code',
         redirect_uri:  process.env.IG_REDIRECT_URI,
         code
       })
     });
     const tokenData = await tokenRes.json();
-    if (tokenData.error) throw new Error(tokenData.error.message);
+    console.log('Short-lived token response:', JSON.stringify(tokenData).slice(0, 300));
+    if (tokenData.error_type || tokenData.error) {
+      throw new Error(tokenData.error_message || tokenData.error?.message || 'Token exchange failed');
+    }
     const shortToken = tokenData.access_token;
+    const igUserId   = tokenData.user_id;
 
-    // 2. Exchange short-lived → long-lived FB user token (60 days)
+    // 2. Exchange short-lived → long-lived token (60 days)
     const longRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${shortToken}`
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&access_token=${shortToken}`
     );
     const longData = await longRes.json();
+    console.log('Long-lived token response:', JSON.stringify(longData).slice(0, 300));
     if (longData.error) throw new Error(longData.error.message);
     const { access_token, expires_in } = longData;
 
-    // 3. Find linked Instagram Business/Creator account — try multiple endpoints
-    const igAccount = await resolveIgAccount(access_token);
-    if (!igAccount) {
-      throw new Error('No Instagram Business or Creator account found. Make sure your Instagram account is connected to a Facebook Page you manage.');
-    }
+    // 3. Get Instagram user info
+    const meRes  = await fetch(`https://graph.instagram.com/me?fields=id,username,name&access_token=${access_token}`);
+    const meData = await meRes.json();
+    console.log('/me response:', JSON.stringify(meData).slice(0, 300));
+    if (meData.error) throw new Error(meData.error.message);
 
     // 4. Upsert user in DB
     await pool.query(`
@@ -232,9 +146,9 @@ app.get('/auth/callback', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5)
       ON CONFLICT (ig_id) DO UPDATE SET
         username=$2, name=$3, access_token=$4, token_expires_at=$5
-    `, [igAccount.id, igAccount.username, igAccount.name || igAccount.username, access_token, Date.now() + (expires_in || 5184000) * 1000]);
+    `, [meData.id, meData.username, meData.name || meData.username, access_token, Date.now() + (expires_in || 5184000) * 1000]);
 
-    req.session.userId = igAccount.id;
+    req.session.userId = meData.id;
     res.redirect('/dashboard.html');
   } catch (err) {
     console.error('Auth error:', err.message);
@@ -244,35 +158,6 @@ app.get('/auth/callback', async (req, res) => {
 
 app.get('/auth/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
-});
-
-// ── Manual token setup (for Graph API Explorer tokens) ────────────────────────
-app.get('/auth/setup', async (req, res) => {
-  const { token } = req.query;
-  if (!token) {
-    return res.status(400).send('Missing ?token= parameter. Get a token from developers.facebook.com/tools/explorer with instagram_basic and pages_show_list permissions.');
-  }
-
-  try {
-    const igAccount = await resolveIgAccount(token);
-    if (!igAccount) {
-      return res.status(400).send('Could not find an Instagram account linked to this token. Make sure the token has instagram_basic and pages_show_list permissions and your Instagram is linked to a Facebook Page.');
-    }
-
-    // Upsert user in DB
-    await pool.query(`
-      INSERT INTO users (ig_id, username, name, access_token, token_expires_at)
-      VALUES ($1,$2,$3,$4,$5)
-      ON CONFLICT (ig_id) DO UPDATE SET
-        username=$2, name=$3, access_token=$4, token_expires_at=$5
-    `, [igAccount.id, igAccount.username, igAccount.name || igAccount.username, token, Date.now() + 5184000 * 1000]);
-
-    req.session.userId = igAccount.id;
-    res.redirect('/dashboard.html');
-  } catch (err) {
-    console.error('Manual setup error:', err.message);
-    res.status(500).send('Setup failed: ' + err.message);
-  }
 });
 
 // ── API: current user info ────────────────────────────────────────────────────
