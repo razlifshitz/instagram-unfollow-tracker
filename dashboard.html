@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — Unfollow tracker</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; min-height: 100vh; }
+
+  header {
+    background: #fff;
+    border-bottom: 1px solid #e8e8e8;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .header-logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .header-logo svg { width: 16px; height: 16px; fill: white; }
+  .header-title { font-size: 15px; font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  #handle { font-size: 13px; color: #666; }
+  .btn {
+    padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    cursor: pointer; border: 1px solid #ddd; background: #fff; color: #1a1a1a;
+    transition: background 0.12s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: #f5f5f5; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-danger { border-color: transparent; background: transparent; color: #999; }
+  .btn-danger:hover { color: #d32f2f; background: #fde8e8; }
+
+  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  .meta { font-size: 13px; color: #888; margin-bottom: 24px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 28px; }
+  .stat {
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .stat-label { font-size: 12px; color: #888; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 600; }
+  .stat-delta { font-size: 12px; margin-top: 3px; color: #888; }
+  .red   { color: #d32f2f; }
+  .green { color: #2e7d32; }
+  .gray  { color: #888; }
+
+  .section-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: #888; margin-bottom: 12px;
+  }
+
+  .card-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+  .user-card {
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; flex-shrink: 0;
+  }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-handle { font-size: 12px; color: #888; margin-top: 2px; }
+  .badge {
+    font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 99px; flex-shrink: 0;
+  }
+  .badge-lost  { background: #fde8e8; color: #b71c1c; }
+  .badge-new   { background: #e8f5e9; color: #1b5e20; }
+  .view-link {
+    font-size: 12px; color: #888; text-decoration: none; flex-shrink: 0; margin-left: 4px;
+    padding: 4px 8px; border-radius: 6px; transition: background 0.12s;
+  }
+  .view-link:hover { background: #f0f0f0; color: #333; }
+
+  .empty {
+    padding: 28px 20px;
+    text-align: center;
+    background: #fff;
+    border: 1px dashed #ddd;
+    border-radius: 12px;
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 28px;
+  }
+
+  .loading-wrap { text-align: center; padding: 60px 20px; }
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid #eee;
+    border-top-color: #888; border-radius: 50%;
+    animation: spin 0.7s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 14px; color: #888; }
+
+  .error-wrap { text-align: center; padding: 48px 20px; }
+  .error-box { background: #fde8e8; border-radius: 12px; padding: 20px 24px; display: inline-block; max-width: 400px; }
+  .error-box p { font-size: 13px; color: #b71c1c; margin-bottom: 12px; }
+
+  .first-check { background: #e8f0fe; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-size: 13px; color: #1a237e; }
+
+  .section-divider { border: none; border-top: 1px solid #eee; margin: 4px 0 24px; }
+
+  @media (max-width: 500px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .stat-value { font-size: 22px; }
+    header { padding: 0 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="header-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+    </div>
+    <span class="header-title">Unfollow tracker</span>
+  </div>
+  <div class="header-right">
+    <span id="handle" class="gray"></span>
+    <button class="btn" id="refresh-btn" onclick="loadDashboard()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+      </svg>
+      Refresh
+    </button>
+    <a href="/auth/logout" class="btn btn-danger">Sign out</a>
+  </div>
+</header>
+
+<main id="main">
+  <div class="loading-wrap">
+    <div class="spinner"></div>
+    <p class="loading-text">Fetching your followers…</p>
+  </div>
+</main>
+
+<script>
+const AVATAR_COLORS = [
+  ['#e8eaf6','#3949ab'],['#fce4ec','#c62828'],['#e0f2f1','#00695c'],
+  ['#fff8e1','#f57f17'],['#f3e5f5','#6a1b9a'],['#e1f5fe','#0277bd'],
+  ['#f9fbe7','#558b2f'],['#fbe9e7','#bf360c'],
+];
+
+function avatarColor(str) {
+  let h = 0;
+  for (const c of str) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+function initials(name, username) {
+  const src = name || username || '?';
+  const parts = src.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[1][0]).toUpperCase()
+    : src.slice(0, 2).toUpperCase();
+}
+
+function avatarEl(name, username) {
+  const [bg, fg] = avatarColor(username || name || '?');
+  const ini = initials(name, username);
+  return `<div class="avatar" style="background:${bg};color:${fg}">${ini}</div>`;
+}
+
+function userCard(f, badgeClass, badgeLabel) {
+  const name = f.name || f.username || 'Unknown';
+  const handle = f.username ? `@${f.username}` : `ID: ${f.id}`;
+  const link = f.username ? `https://instagram.com/${f.username}` : '#';
+  return `
+    <div class="user-card">
+      ${avatarEl(f.name, f.username)}
+      <div class="user-info">
+        <div class="user-name">${name}</div>
+        <div class="user-handle">${handle}</div>
+      </div>
+      <span class="badge ${badgeClass}">${badgeLabel}</span>
+      <a class="view-link" href="${link}" target="_blank" rel="noopener">View →</a>
+    </div>`;
+}
+
+function fmt(n) { return n.toLocaleString(); }
+
+function renderDashboard(data) {
+  const checkedAt = new Date(data.checkedAt).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+  const delta = data.total - data.prevTotal;
+  const deltaStr = delta === 0 ? 'No change' : (delta > 0 ? `+${fmt(delta)} since last check` : `${fmt(delta)} since last check`);
+  const deltaClass = delta > 0 ? 'green' : delta < 0 ? 'red' : 'gray';
+
+  let firstCheckBanner = '';
+  if (data.isFirstCheck) {
+    firstCheckBanner = `<div class="first-check">
+      First sync complete — ${fmt(data.total)} followers saved as your baseline. Visit again to see changes.
+    </div>`;
+  }
+
+  const unfollowedHTML = data.unfollowed.length
+    ? data.unfollowed.map(f => userCard(f, 'badge-lost', 'Unfollowed')).join('')
+    : `<div class="empty">No unfollowers since last check</div>`;
+
+  const newHTML = data.newFollowers.length
+    ? data.newFollowers.map(f => userCard(f, 'badge-new', 'New')).join('')
+    : `<div class="empty">No new followers since last check</div>`;
+
+  document.getElementById('main').innerHTML = `
+    <p class="meta">Last refreshed: ${checkedAt} &nbsp;·&nbsp; @${data.user.username}</p>
+
+    ${firstCheckBanner}
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Total followers</div>
+        <div class="stat-value">${fmt(data.total)}</div>
+        <div class="stat-delta ${deltaClass}">${deltaStr}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Unfollowed you</div>
+        <div class="stat-value ${data.unfollowed.length ? 'red' : ''}">${fmt(data.unfollowed.length)}</div>
+        <div class="stat-delta gray">since last visit</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">New followers</div>
+        <div class="stat-value ${data.newFollowers.length ? 'green' : ''}">${fmt(data.newFollowers.length)}</div>
+        <div class="stat-delta gray">since last visit</div>
+      </div>
+    </div>
+
+    <div class="section-label">Unfollowed you</div>
+    <div class="card-list">${unfollowedHTML}</div>
+
+    <hr class="section-divider">
+
+    <div class="section-label">New followers</div>
+    <div class="card-list">${newHTML}</div>
+  `;
+}
+
+async function loadDashboard() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  document.getElementById('main').innerHTML = `
+    <div class="loading-wrap">
+      <div class="spinner"></div>
+      <p class="loading-text">Fetching your followers…</p>
+    </div>`;
+
+  try {
+    const res  = await fetch('/api/dashboard');
+    if (res.status === 401) { location.href = '/'; return; }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderDashboard(data);
+  } catch (err) {
+    document.getElementById('main').innerHTML = `
+      <div class="error-wrap">
+        <div class="error-box">
+          <p>${err.message || 'Failed to load dashboard.'}</p>
+          <button class="btn" onclick="loadDashboard()">Try again</button>
+        </div>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function init() {
+  const res  = await fetch('/api/me');
+  if (res.status === 401) { location.href = '/'; return; }
+  const user = await res.json();
+  document.getElementById('handle').textContent = `@${user.username}`;
+  loadDashboard();
+}
+
+init();
+</script>
+</body>
+</html>
