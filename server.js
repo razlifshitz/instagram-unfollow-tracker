@@ -120,62 +120,53 @@ app.get('/auth/callback', async (req, res) => {
     if (tokenData.error) throw new Error(tokenData.error.message);
     const shortToken = tokenData.access_token;
 
-    // 2. Exchange for long-lived FB user token (60 days)
+    // 2. Find Instagram account using the SHORT-LIVED token (before exchange)
+    //    Business Login tokens behave differently after fb_exchange_token
+    let igAccount = null;
+    let igDebug = {};
+
+    // Try A: pages → instagram_business_account (works with regular Facebook Login)
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username,name}&access_token=${shortToken}`
+    );
+    const pagesData = await pagesRes.json();
+    igDebug.pages = pagesData;
+    if (!pagesData.error && pagesData.data?.length > 0) {
+      const p = pagesData.data.find(p => p.instagram_business_account);
+      if (p) igAccount = p.instagram_business_account;
+    }
+
+    // Try B: /me/instagram_business_accounts (Facebook Login for Business direct)
+    if (!igAccount) {
+      const igRes = await fetch(
+        `https://graph.facebook.com/v19.0/me/instagram_business_accounts?fields=id,username,name&access_token=${shortToken}`
+      );
+      const igData = await igRes.json();
+      igDebug.igAccounts = igData;
+      if (!igData.error && igData.data?.length > 0) igAccount = igData.data[0];
+    }
+
+    // Try C: /me?fields=instagram_business_account
+    if (!igAccount) {
+      const meRes = await fetch(
+        `https://graph.facebook.com/v19.0/me?fields=id,name,instagram_business_account{id,username,name}&access_token=${shortToken}`
+      );
+      const meData = await meRes.json();
+      igDebug.me = meData;
+      if (!meData.error && meData.instagram_business_account) igAccount = meData.instagram_business_account;
+    }
+
+    if (!igAccount) {
+      throw new Error(`Could not find Instagram account. Debug: ${JSON.stringify(igDebug).substring(0, 600)}`);
+    }
+
+    // 3. Exchange short-lived → long-lived FB user token (60 days)
     const longRes = await fetch(
       `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${shortToken}`
     );
     const longData = await longRes.json();
     if (longData.error) throw new Error(longData.error.message);
     const { access_token, expires_in } = longData;
-
-    // 3. Get Instagram account via Facebook Pages
-    //    With Facebook Login for Business, the user token grants access to Pages
-    //    via pages_show_list. Each Page has a page-scoped access token, and the
-    //    instagram_business_account field must be fetched using that page token.
-    let igAccount = null;
-
-    // Step 3a: Get list of pages the user manages, fetching the linked Instagram account for each.
-    // We request the page's own access_token so we can use it to query instagram_business_account.
-    const pagesRes = await fetch(
-      `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name}&access_token=${access_token}`
-    );
-    const pagesData = await pagesRes.json();
-
-    if (!pagesData.error && pagesData.data?.length > 0) {
-      const pageWithIG = pagesData.data.find(p => p.instagram_business_account);
-      if (pageWithIG) {
-        igAccount = pageWithIG.instagram_business_account;
-      }
-    }
-
-    // Step 3b: Try /me/instagram_business_accounts (Facebook Login for Business direct endpoint)
-    if (!igAccount) {
-      const igRes = await fetch(
-        `https://graph.facebook.com/v19.0/me/instagram_business_accounts?fields=id,username,name&access_token=${access_token}`
-      );
-      const igData = await igRes.json();
-      if (!igData.error && igData.data?.length > 0) {
-        igAccount = igData.data[0];
-      }
-    }
-
-    // Step 3c: Try fetching the Instagram account directly by known ID using the user token
-    // This works when the token has instagram_basic scope granted for the specific account
-    if (!igAccount) {
-      const knownIgId = '17841400904834252';
-      const directRes = await fetch(
-        `https://graph.facebook.com/v19.0/${knownIgId}?fields=id,username,name&access_token=${access_token}`
-      );
-      const directData = await directRes.json();
-      if (!directData.error && directData.id) {
-        igAccount = directData;
-      }
-    }
-
-    if (!igAccount) {
-      console.error('Auth: could not retrieve Instagram account. Pages response:', JSON.stringify(pagesData).substring(0, 500));
-      throw new Error('Could not find a linked Instagram Business account. Make sure your Instagram account is connected to a Facebook Page and try again.');
-    }
 
     // 4. Upsert user in DB
     await pool.query(`
