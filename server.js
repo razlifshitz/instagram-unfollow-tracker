@@ -150,7 +150,7 @@ app.get('/auth/callback', async (req, res) => {
     res.redirect('/dashboard.html');
   } catch (err) {
     console.error('Auth error:', err.message);
-    res.redirect('/?error=auth_failed');
+    res.redirect('/?error=' + encodeURIComponent(err.message));
   }
 });
 
