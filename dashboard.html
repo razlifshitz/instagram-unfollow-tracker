@@ -40,8 +40,6 @@
   .btn-danger { border-color: transparent; background: transparent; color: #999; }
   .btn-danger:hover { color: #d32f2f; background: #fde8e8; }
 
-  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
-
   .meta { font-size: 13px; color: #888; margin-bottom: 24px; }
 
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 28px; }
@@ -120,6 +118,23 @@
 
   .section-divider { border: none; border-top: 1px solid #eee; margin: 4px 0 24px; }
 
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid #e8e8e8; }
+  .tab {
+    padding: 8px 16px; font-size: 13px; font-weight: 500; color: #888;
+    cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent;
+    margin-bottom: -1px; transition: color 0.12s;
+  }
+  .tab:hover { color: #333; }
+  .tab.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
+
+  .history-list { display: flex; flex-direction: column; gap: 8px; }
+  .history-card {
+    background: #fff; border: 1px solid #e8e8e8; border-radius: 12px;
+    padding: 12px 16px; display: flex; align-items: center; gap: 14px;
+  }
+  .history-card .avatar { width: 38px; height: 38px; font-size: 12px; }
+  .history-meta { font-size: 11px; color: #aaa; margin-top: 2px; }
+
   @media (max-width: 500px) {
     .stats { grid-template-columns: 1fr 1fr; }
     .stat-value { font-size: 22px; }
@@ -148,10 +163,22 @@
   </div>
 </header>
 
-<main id="main">
-  <div class="loading-wrap">
-    <div class="spinner"></div>
-    <p class="loading-text">Fetching your followers…</p>
+<main style="max-width:720px;margin:0 auto;padding:28px 20px 60px">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('dashboard', this)">Overview</button>
+    <button class="tab" onclick="switchTab('history', this)">History</button>
+  </div>
+  <div id="tab-dashboard">
+    <div class="loading-wrap">
+      <div class="spinner"></div>
+      <p class="loading-text">Fetching your followers…</p>
+    </div>
+  </div>
+  <div id="tab-history" style="display:none">
+    <div class="loading-wrap">
+      <div class="spinner"></div>
+      <p class="loading-text">Loading history…</p>
+    </div>
   </div>
 </main>
 
@@ -200,6 +227,16 @@ function userCard(f, badgeClass, badgeLabel) {
 
 function fmt(n) { return n.toLocaleString(); }
 
+let historyLoaded = false;
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-dashboard').style.display = name === 'dashboard' ? '' : 'none';
+  document.getElementById('tab-history').style.display   = name === 'history'   ? '' : 'none';
+  if (name === 'history' && !historyLoaded) loadHistory();
+}
+
 function renderDashboard(data) {
   const checkedAt = new Date(data.checkedAt).toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -223,7 +260,7 @@ function renderDashboard(data) {
     ? data.newFollowers.map(f => userCard(f, 'badge-new', 'New')).join('')
     : `<div class="empty">No new followers since last check</div>`;
 
-  document.getElementById('main').innerHTML = `
+  document.getElementById('tab-dashboard').innerHTML = `
     <p class="meta">Last refreshed: ${checkedAt} &nbsp;·&nbsp; @${data.user.username}</p>
 
     ${firstCheckBanner}
@@ -256,10 +293,68 @@ function renderDashboard(data) {
   `;
 }
 
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function renderHistory(rows) {
+  if (!rows.length) {
+    document.getElementById('tab-history').innerHTML = `<div class="empty">No history yet — visit the dashboard to start tracking.</div>`;
+    return;
+  }
+
+  const items = rows.map(r => {
+    const name   = r.follower_name || r.follower_username || 'Unknown';
+    const handle = r.follower_username ? `@${r.follower_username}` : `ID: ${r.follower_ig_id}`;
+    const link   = r.follower_username ? `https://instagram.com/${r.follower_username}` : '#';
+    const isUnfollow = r.change_type === 'unfollow';
+    return `
+      <div class="history-card">
+        ${avatarEl(r.follower_name, r.follower_username)}
+        <div class="user-info">
+          <div class="user-name">${name}</div>
+          <div class="user-handle">${handle}</div>
+          <div class="history-meta">${timeAgo(r.detected_at)}</div>
+        </div>
+        <span class="badge ${isUnfollow ? 'badge-lost' : 'badge-new'}">${isUnfollow ? 'Unfollowed' : 'Followed'}</span>
+        <a class="view-link" href="${link}" target="_blank" rel="noopener">View →</a>
+      </div>`;
+  }).join('');
+
+  document.getElementById('tab-history').innerHTML = `
+    <div class="history-list">${items}</div>`;
+}
+
+async function loadHistory() {
+  try {
+    const res  = await fetch('/api/history');
+    if (res.status === 401) { location.href = '/'; return; }
+    const rows = await res.json();
+    historyLoaded = true;
+    renderHistory(rows);
+  } catch (err) {
+    document.getElementById('tab-history').innerHTML = `
+      <div class="error-wrap">
+        <div class="error-box">
+          <p>${err.message || 'Failed to load history.'}</p>
+          <button class="btn" onclick="loadHistory()">Try again</button>
+        </div>
+      </div>`;
+  }
+}
+
 async function loadDashboard() {
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true;
-  document.getElementById('main').innerHTML = `
+  document.getElementById('tab-dashboard').innerHTML = `
     <div class="loading-wrap">
       <div class="spinner"></div>
       <p class="loading-text">Fetching your followers…</p>
@@ -271,8 +366,9 @@ async function loadDashboard() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     renderDashboard(data);
+    historyLoaded = false; // stale after a refresh
   } catch (err) {
-    document.getElementById('main').innerHTML = `
+    document.getElementById('tab-dashboard').innerHTML = `
       <div class="error-wrap">
         <div class="error-box">
           <p>${err.message || 'Failed to load dashboard.'}</p>
