@@ -60,13 +60,13 @@ async function refreshTokenIfNeeded(user) {
   const tenDays = 10 * 24 * 60 * 60 * 1000;
   if (user.token_expires_at - Date.now() < tenDays) {
     const r = await fetch(
-      `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${user.access_token}`
+      `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${user.access_token}`
     );
     const data = await r.json();
     if (data.access_token) {
       await pool.query(
         'UPDATE users SET access_token=$1, token_expires_at=$2 WHERE ig_id=$3',
-        [data.access_token, Date.now() + data.expires_in * 1000, user.ig_id]
+        [data.access_token, Date.now() + (data.expires_in || 5184000) * 1000, user.ig_id]
       );
       return data.access_token;
     }
@@ -105,7 +105,7 @@ app.get('/auth/callback', async (req, res) => {
   if (error || !code) return res.redirect('/?error=access_denied');
 
   try {
-    // 1. Short-lived token
+    // 1. Exchange code for short-lived FB user token
     const tokenRes = await fetch('https://graph.facebook.com/v19.0/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -116,19 +116,27 @@ app.get('/auth/callback', async (req, res) => {
         code
       })
     });
-    const { access_token: shortToken, error: tokenErr } = await tokenRes.json();
-    if (tokenErr) throw new Error(tokenErr.message);
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) throw new Error(tokenData.error.message);
+    const shortToken = tokenData.access_token;
 
-    // 2. Long-lived token (60 days)
+    // 2. Exchange for long-lived FB user token (60 days)
     const longRes = await fetch(
-      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${process.env.IG_APP_SECRET}&access_token=${shortToken}`
+      `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.IG_APP_ID}&client_secret=${process.env.IG_APP_SECRET}&fb_exchange_token=${shortToken}`
     );
-    const { access_token, expires_in } = await longRes.json();
+    const longData = await longRes.json();
+    if (longData.error) throw new Error(longData.error.message);
+    const { access_token, expires_in } = longData;
 
-    // 3. Get Instagram user info
-    const meRes  = await fetch(`https://graph.instagram.com/me?fields=id,username,name&access_token=${access_token}`);
-    const me     = await meRes.json();
-    if (!me.id) throw new Error('Could not retrieve Instagram user');
+    // 3. Get the Instagram Business/Creator account linked to this FB account
+    const meRes = await fetch(
+      `https://graph.facebook.com/v19.0/me?fields=id,name,instagram_business_account{id,username,name}&access_token=${access_token}`
+    );
+    const meData = await meRes.json();
+    if (meData.error) throw new Error(meData.error.message);
+
+    const igAccount = meData.instagram_business_account;
+    if (!igAccount) throw new Error('No Instagram Business/Creator account linked to this Facebook account');
 
     // 4. Upsert user in DB
     await pool.query(`
@@ -136,9 +144,9 @@ app.get('/auth/callback', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5)
       ON CONFLICT (ig_id) DO UPDATE SET
         username=$2, name=$3, access_token=$4, token_expires_at=$5
-    `, [me.id, me.username, me.name || me.username, access_token, Date.now() + expires_in * 1000]);
+    `, [igAccount.id, igAccount.username, igAccount.name || igAccount.username, access_token, Date.now() + (expires_in || 5184000) * 1000]);
 
-    req.session.userId = me.id;
+    req.session.userId = igAccount.id;
     res.redirect('/dashboard.html');
   } catch (err) {
     console.error('Auth error:', err.message);
