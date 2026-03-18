@@ -5,6 +5,7 @@ const { Pool }  = require('pg');
 const path = require('path');
 
 const app = express();
+app.set('trust proxy', 1); // Required for secure cookies behind Railway's proxy
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ app.get('/auth/callback', async (req, res) => {
     `, [meData.id, meData.username, meData.name || meData.username, access_token, Date.now() + (expires_in || 5184000) * 1000]);
 
     req.session.userId = meData.id;
-    res.redirect('/dashboard.html');
+    req.session.save(() => res.redirect('/dashboard.html'));
   } catch (err) {
     console.error('Auth error:', err.message);
     res.redirect('/?error=' + encodeURIComponent(err.message));
